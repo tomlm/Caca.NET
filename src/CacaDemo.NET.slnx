@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="LibCaca/LibCaca.csproj" />
+  <Project Path="CacaDemo.NET/CacaDemo.NET.csproj" />
+</Solution>
