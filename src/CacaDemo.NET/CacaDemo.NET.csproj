@@ -33,8 +33,6 @@
     <PackageId>CacaDemo.NET</PackageId>
     <ToolCommandName>CacaDemo.NET</ToolCommandName>
     <PackageOutputPath>./nupkg</PackageOutputPath>
-    <RuntimeIdentifiers Condition="'$(Configuration)' == 'Release'">win-x64;linux-x64;osx-x64;win-arm64;linux-arm64;osx-arm64;any</RuntimeIdentifiers>
-    <PublishReadyToRun Condition="'$(Configuration)' == 'Release'">true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>
