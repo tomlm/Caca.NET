@@ -1,18 +1,18 @@
-# CacaDemo.NET
+# Caca.NET
 
-A .NET port of [cacademo](https://github.com/cacalabs/libcaca/blob/main/src/cacademo.c),
-the demo-effects program that ships with [libcaca](https://github.com/cacalabs/libcaca).
-It cycles in order through a set of full-screen ASCII/ANSI effects, wiping
-between them with randomly chosen transitions.
+Terminal graphics for .NET: a managed port of
+[libcaca](https://github.com/cacalabs/libcaca)'s canvas, drawing primitives,
+bitmap dithering engine and terminal driver, published as the **Caca.NET**
+package. See [Using the library](#using-the-library) to build on it.
 
-**There is no native dependency.** The parts of libcaca the demo needs — the
-canvas, the drawing primitives, the bitmap dithering engine and a terminal
-driver — are ported to managed C# in `src/Caca.NET`. It is pure IL: clone,
-`dotnet run`, done, on Windows, Linux or macOS.
+**There is no native dependency.** It is pure IL — clone, `dotnet run`, done,
+on Windows, Linux or macOS.
 
-That port is published on its own as the **Caca.NET** package, so you can build
-your own terminal graphics on it without any of the demo; see
-[Using the library](#using-the-library).
+Exercising all of it is a port of
+[cacademo](https://github.com/cacalabs/libcaca/blob/main/src/cacademo.c), the
+demo-effects program that ships with libcaca, which cycles in order through a
+set of full-screen ASCII/ANSI effects, wiping between them with randomly
+chosen transitions.
 
 ## Effects
 
