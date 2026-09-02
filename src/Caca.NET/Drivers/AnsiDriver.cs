@@ -49,6 +49,7 @@ internal sealed class AnsiDriver : IDriver
     private bool _pendingResize;
     private bool _quitRequested;
     private bool _disposed;
+    private bool _raisedTimerResolution;
 
     public AnsiDriver()
     {
@@ -56,6 +57,7 @@ internal sealed class AnsiDriver : IDriver
         _ownsConsole = true;
 
         EnableVirtualTerminal();
+        _raisedTimerResolution = RaiseTimerResolution();
 
         (Width, Height) = ReadSize();
 
@@ -226,6 +228,14 @@ internal sealed class AnsiDriver : IDriver
             return;
 
         _disposed = true;
+
+        if (_raisedTimerResolution)
+        {
+            try { timeEndPeriod(TimerResolutionMs); }
+            catch { /* nothing to give back if the call was never there */ }
+
+            _raisedTimerResolution = false;
+        }
         Console.CancelKeyPress -= OnCancelKeyPress;
 
         try
@@ -441,6 +451,45 @@ internal sealed class AnsiDriver : IDriver
     /// OS call, not a third-party library, so it costs us no dependency.
     /// Windows Terminal has it on already; the legacy conhost does not.
     /// </summary>
+    /// <summary>
+    /// Asks Windows for a one millisecond timer tick, and reports whether it got one.
+    /// </summary>
+    /// <remarks>
+    /// <para>The frame pacing in Display.Refresh sleeps out whatever is left of the frame
+    /// interval, and Thread.Sleep cannot wake earlier than the system timer tick. That tick
+    /// defaults to about 15.6ms on Windows, so EVERY sleep shorter than that lasts 15.6ms:
+    /// measured here, Sleep(1ms) took 15.64ms and Sleep(14.3ms) took 15.93ms.</para>
+    /// <para>At fifty frames a second the interval is 20ms and the work is nearer 6, so the
+    /// driver asks for a ~14ms sleep and is given ~16 -- the frame lands at 21.6ms and the demo
+    /// runs at 46fps instead of 50. It gets worse as the work grows: at 16ms of work the
+    /// leftover 4ms sleep still costs a full tick, which is 32ms a frame and 31fps. The same
+    /// binary under WSL reaches 50, because a Linux tick is about a millisecond.</para>
+    /// <para>So this is not a micro-optimisation, it is the difference between hitting the
+    /// requested frame rate and missing it by a quarter. The resolution is process-wide while
+    /// held and given back in Dispose, which is why the flag is tracked rather than the call
+    /// simply repeated.</para>
+    /// </remarks>
+    private static bool RaiseTimerResolution()
+    {
+        if (!OperatingSystem.IsWindows())
+            return false;
+
+        try
+        {
+            /* 0 is TIMERR_NOERROR. Anything else means the period was refused, and
+             * timeEndPeriod must NOT then be called for it. */
+            return timeBeginPeriod(TimerResolutionMs) == 0;
+        }
+        catch (DllNotFoundException)
+        {
+            return false;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return false;
+        }
+    }
+
     private static void EnableVirtualTerminal()
     {
         if (!OperatingSystem.IsWindows())
@@ -466,6 +515,14 @@ internal sealed class AnsiDriver : IDriver
         {
         }
     }
+
+    private const uint TimerResolutionMs = 1;
+
+    [DllImport("winmm.dll", SetLastError = true)]
+    private static extern uint timeBeginPeriod(uint uPeriod);
+
+    [DllImport("winmm.dll", SetLastError = true)]
+    private static extern uint timeEndPeriod(uint uPeriod);
 
     private const int StdOutputHandle = -11;
     private const uint EnableVirtualTerminalProcessing = 0x0004;
