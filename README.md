@@ -1,3 +1,5 @@
+![Icon](https://raw.githubusercontent.com/tomlm/Caca.NET/main/icon.png)
+
 # Caca.NET
 
 A  cross platform .NET port of [cacalabs/libcaca: 💩 Colour ASCII Art Library](https://github.com/cacalabs/libcaca).
