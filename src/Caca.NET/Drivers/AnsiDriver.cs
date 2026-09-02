@@ -32,7 +32,21 @@ internal sealed class AnsiDriver : IDriver
     /// <summary>How long to wait for the terminal to answer the mode query.</summary>
     private const int QueryTimeoutMs = 100;
 
-    private readonly StringBuilder _out = new(1 << 16);
+    /// <summary>The frame under construction, reused for the life of the driver.</summary>
+    /// <remarks>
+    /// <para>A char array rather than a StringBuilder, because everything the builder offered was
+    /// being paid for and then thrown away. The frame has to LEAVE it to be written, and every way
+    /// out costs something: ToString copies the whole frame into a fresh string, tens of thousands
+    /// of characters and twice that in bytes, which crosses the large-object threshold on a big
+    /// enough screen; handing the builder to TextWriter skips the copy but writes it a chunk at a
+    /// time, and a console write is charged per call as well as per byte.</para>
+    /// <para>Building into one array and handing over one span of it has neither the copy nor the
+    /// extra calls, and drops the builder's per-Append chunk bookkeeping as well.</para>
+    /// </remarks>
+    private char[] _buf = new char[1 << 16];
+
+    /// <summary>How much of <see cref="_buf"/> the frame so far occupies.</summary>
+    private int _len;
     private readonly TextWriter _writer;
     private readonly bool _ownsConsole;
     private readonly bool _syncUpdate;
@@ -92,6 +106,16 @@ internal sealed class AnsiDriver : IDriver
 
         bool full = w != _prevWidth || h != _prevHeight;
 
+        _len = 0;
+
+        /* Written BEFORE the frame rather than inserted in front of it afterwards. Insert(0, ...)
+         * shifts every character already in the buffer to make room for eight. */
+        if (_syncUpdate)
+            Put(BeginSyncUpdate);
+
+        /* What an empty frame looks like now that it may already carry that opening half. */
+        int prefix = _len;
+
         if (full)
         {
             _prevChars = new int[w * h];
@@ -99,7 +123,8 @@ internal sealed class AnsiDriver : IDriver
             _prevChars.AsSpan().Fill(-1);
             _prevWidth = w;
             _prevHeight = h;
-            _out.Append(Esc).Append("2J");
+            Put(Esc);
+            Put("2J");
         }
 
         int[] chars = canvas.Chars;
@@ -126,7 +151,11 @@ internal sealed class AnsiDriver : IDriver
 
                 if (cursorY != y || cursorX != x)
                 {
-                    _out.Append(Esc).Append(y + 1).Append(';').Append(x + 1).Append('H');
+                    Put(Esc);
+                    Put(y + 1);
+                    Put(';');
+                    Put(x + 1);
+                    Put('H');
                     cursorX = x;
                     cursorY = y;
                 }
@@ -149,29 +178,29 @@ internal sealed class AnsiDriver : IDriver
                  * Stay on the char overload for the BMP so a 50fps redraw is
                  * not allocating a string per cell. */
                 if (ch < 0x20)
-                    _out.Append(' ');
+                    Put(' ');
                 else if (ch < 0x10000)
-                    _out.Append((char)ch);
+                    Put((char)ch);
                 else
-                    _out.Append(char.ConvertFromUtf32(ch));
+                    Put(char.ConvertFromUtf32(ch));
 
                 cursorX++;
             }
         }
 
-        if (_out.Length == 0)
+        if (_len == prefix)
+        {
+            _len = 0;
             return;
+        }
 
         /* Everything between BSU and ESU is presented as one frame, so the
          * terminal never paints a half-drawn canvas. */
         if (_syncUpdate)
-        {
-            _out.Insert(0, BeginSyncUpdate);
-            _out.Append(EndSyncUpdate);
-        }
+            Put(EndSyncUpdate);
 
-        Write(_out.ToString());
-        _out.Clear();
+        Write(_buf, _len);
+        _len = 0;
         Flush();
     }
 
@@ -377,19 +406,22 @@ internal sealed class AnsiDriver : IDriver
 
     private void AppendSgr(int fg, int bg, AnsiStyle style)
     {
-        _out.Append(Esc).Append('0');
+        Put(Esc);
+        Put('0');
 
-        if ((style & AnsiStyle.Bold) != 0) _out.Append(";1");
-        if ((style & AnsiStyle.Italics) != 0) _out.Append(";3");
-        if ((style & AnsiStyle.Underline) != 0) _out.Append(";4");
-        if ((style & AnsiStyle.Blink) != 0) _out.Append(";5");
+        if ((style & AnsiStyle.Bold) != 0) Put(";1");
+        if ((style & AnsiStyle.Italics) != 0) Put(";3");
+        if ((style & AnsiStyle.Underline) != 0) Put(";4");
+        if ((style & AnsiStyle.Blink) != 0) Put(";5");
 
         int fgIndex = ToAnsiIndex[fg & 0x7];
         int bgIndex = ToAnsiIndex[bg & 0x7];
 
-        _out.Append(';').Append(fg < 8 ? 30 + fgIndex : 90 + fgIndex);
-        _out.Append(';').Append(bg < 8 ? 40 + bgIndex : 100 + bgIndex);
-        _out.Append('m');
+        Put(';');
+        Put(fg < 8 ? 30 + fgIndex : 90 + fgIndex);
+        Put(';');
+        Put(bg < 8 ? 40 + bgIndex : 100 + bgIndex);
+        Put('m');
     }
 
     private static int Translate(ConsoleKeyInfo key)
@@ -442,6 +474,66 @@ internal sealed class AnsiDriver : IDriver
     {
         if (_ownsConsole)
             _writer.Write(s);
+    }
+
+    /// <summary>Writes the frame as one span of the buffer it was built in.</summary>
+    /// <remarks>
+    /// The char[] overload and not the span one: TextWriter does not override
+    /// Write(ReadOnlySpan&lt;char&gt;) on the console writer, so the base implementation rents a
+    /// second array, copies into it, and calls this anyway. Console.Out is also, measured, the
+    /// fastest of the paths available here -- a console handle wants WriteConsoleW, which it uses,
+    /// where a raw stream over the same handle falls back to WriteFile and is several times
+    /// slower. That is the reverse of the usual advice, which assumes a pipe.
+    /// </remarks>
+    private void Write(char[] buffer, int count)
+    {
+        if (_ownsConsole)
+            _writer.Write(buffer, 0, count);
+    }
+
+    /// <summary>Makes room for <paramref name="extra"/> more characters.</summary>
+    /// <remarks>
+    /// Doubling rather than growing to fit, so a frame that creeps up in size does not copy the
+    /// whole buffer on every one of its steps. The initial 64K covers a full screen of per-cell
+    /// colour, so in practice this never runs after the first frame.
+    /// </remarks>
+    private void Ensure(int extra)
+    {
+        if (_len + extra <= _buf.Length)
+            return;
+
+        int size = _buf.Length;
+
+        while (size < _len + extra)
+            size *= 2;
+
+        Array.Resize(ref _buf, size);
+    }
+
+    private void Put(char c)
+    {
+        Ensure(1);
+        _buf[_len++] = c;
+    }
+
+    private void Put(string s)
+    {
+        Ensure(s.Length);
+        s.CopyTo(0, _buf, _len, s.Length);
+        _len += s.Length;
+    }
+
+    /// <summary>Formats a number straight into the frame, allocating nothing.</summary>
+    /// <remarks>
+    /// A cursor move carries two of these and a colour change two more, so a full screen formats
+    /// thousands. The digits land in the frame itself rather than in a builder to be copied out.
+    /// </remarks>
+    private void Put(int value)
+    {
+        /* Eleven is the widest an int can format to, and nothing here is ever negative. */
+        Ensure(11);
+        value.TryFormat(_buf.AsSpan(_len), out int written);
+        _len += written;
     }
 
     private void Flush() => _writer.Flush();
