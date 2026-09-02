@@ -13,6 +13,7 @@
  *  http://www.wtfpl.net/ for more details.
  */
 
+using System.Diagnostics;
 using Caca;
 using CacaDemo.Demos;
 
@@ -25,6 +26,52 @@ internal static class Program
     /// default rotation includes it.
     /// </summary>
     private sealed record DemoEntry(string Name, IDemo Demo, bool InRotation);
+
+    /// <summary>
+    /// Counts presented frames and republishes a rate a few times a second.
+    /// </summary>
+    /// <remarks>
+    /// <para>Averaged over a window rather than derived from the last frame gap: at fifty frames
+    /// a second a single gap is a handful of milliseconds, so an instantaneous reading is mostly
+    /// scheduler noise and unreadable besides -- the digits change faster than an eye can follow.</para>
+    /// <para>The window is wall time, not a frame count, so the reading keeps updating at a
+    /// steady cadence even when the rate collapses. Counting frames instead would make a terminal
+    /// that had fallen to two frames a second update its own bad news every ten seconds.</para>
+    /// </remarks>
+    private sealed class FpsMeter
+    {
+        /// <summary>How much wall time each reading averages over.</summary>
+        private const double WindowSeconds = 0.5;
+
+        private readonly Stopwatch _clock = Stopwatch.StartNew();
+        private long _windowStart;
+        private int _frames;
+        private double _rate;
+
+        /// <summary>Records one presented frame.</summary>
+        public void Tick()
+        {
+            _frames++;
+
+            long now = _clock.ElapsedTicks;
+            double elapsed = (double)(now - _windowStart) / Stopwatch.Frequency;
+
+            if (elapsed < WindowSeconds)
+                return;
+
+            _rate = _frames / elapsed;
+            _frames = 0;
+            _windowStart = now;
+        }
+
+        /// <summary>
+        /// The reading, at a fixed width so a shrinking number cannot leave a digit of the
+        /// previous one behind on a canvas the demo did not happen to repaint.
+        /// </summary>
+        public string Text => _rate > 0
+            ? string.Format(" {0,6:0.0} fps ", _rate)
+            : "   --.- fps ";
+    }
 
     private static readonly DemoEntry[] All =
     [
@@ -47,8 +94,10 @@ internal static class Program
 
     private static int Main(string[] args)
     {
-        if (!ParseArgs(args, out IDemo[] fn, out bool handled))
+        if (!ParseArgs(args, out IDemo[] fn, out bool handled, out bool showFps))
             return handled ? 0 : 1;
+
+        FpsMeter? fps = showFps ? new FpsMeter() : null;
 
         int frame = 0;
         int next = -1;
@@ -177,6 +226,21 @@ internal static class Program
                                frontcv.Height - 2, Banner);
             }
 
+            /* Counted here rather than after Refresh, because Refresh is where the frame
+             * interval is waited out -- so this counts frames actually PRESENTED, at the rate
+             * they reach the terminal. A terminal that cannot keep up drags the reading below
+             * the rate DisplayTime asks for, which is the whole point of showing it. */
+            if (fps is not null)
+            {
+                fps.Tick();
+
+                string reading = fps.Text;
+                /* Top right, mirroring the banner's inset at the bottom, so the two never
+                 * collide during the first hundred frames. */
+                frontcv.SetColorAnsi(AnsiColor.Black, AnsiColor.White);
+                frontcv.PutStr(frontcv.Width - reading.Length - 2, 1, reading);
+            }
+
             dp.Refresh();
         }
 
@@ -196,10 +260,11 @@ internal static class Program
     /// <returns><c>false</c> if the program should exit without running, with
     /// <paramref name="handled"/> telling apart <c>--help</c> from a bad
     /// argument.</returns>
-    private static bool ParseArgs(string[] args, out IDemo[] fn, out bool handled)
+    private static bool ParseArgs(string[] args, out IDemo[] fn, out bool handled, out bool showFps)
     {
         fn = [];
         handled = false;
+        showFps = false;
 
         List<IDemo> selected = [];
 
@@ -220,6 +285,16 @@ internal static class Program
                     Console.WriteLine(entry.Name);
                 handled = true;
                 return false;
+            }
+
+            /* Answered before the effect lookup below, which would otherwise reject it as an
+             * unrecognised effect name. Deliberately not added to `selected`: asking for the
+             * counter says nothing about WHICH effects to run, so `--fps` on its own still
+             * gets the whole rotation. */
+            if (arg.StartsWith('-') && name.Equals("fps", StringComparison.OrdinalIgnoreCase))
+            {
+                showFps = true;
+                continue;
             }
 
             DemoEntry? match = arg.StartsWith('-')
@@ -266,6 +341,7 @@ internal static class Program
             w.WriteLine($"  --{entry.Name}{note}");
         }
         w.WriteLine();
+        w.WriteLine("  --fps       show the achieved frame rate in the top right corner");
         w.WriteLine("  --list      list the effect names, one per line");
         w.WriteLine("  -h, --help  show this help");
     }
