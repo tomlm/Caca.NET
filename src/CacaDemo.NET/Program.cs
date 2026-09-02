@@ -37,6 +37,10 @@ internal static class Program
         new("rotozoom", new Rotozoom(), true),
     ];
 
+    /// <summary>Shown over the first hundred frames, two columns in from the
+    /// right as upstream places it.</summary>
+    private const string Banner = " -=[ Powered by Caca.NET ]=- ";
+
     private const int TransitionFrames = 40;
 
     private static int DemoFrames() => CacaNet.Rand(500, 1000);
@@ -169,8 +173,8 @@ internal static class Program
             frontcv.SetColorAnsi(AnsiColor.White, AnsiColor.Blue);
             if (frame < 100)
             {
-                frontcv.PutStr(frontcv.Width - 30, frontcv.Height - 2,
-                               " -=[ Powered by libcaca ]=- ");
+                frontcv.PutStr(frontcv.Width - Banner.Length - 2,
+                               frontcv.Height - 2, Banner);
             }
 
             dp.Refresh();

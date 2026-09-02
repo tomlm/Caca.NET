@@ -1,73 +1,16 @@
 # Caca.NET
 
-Terminal graphics for .NET: a managed port of
-[libcaca](https://github.com/cacalabs/libcaca)'s canvas, drawing primitives,
-bitmap dithering engine and terminal driver, published as the **Caca.NET**
-package. See [Using the library](#using-the-library) to build on it.
+A  cross platform .NET port of [cacalabs/libcaca: 💩 Colour ASCII Art Library](https://github.com/cacalabs/libcaca).
 
-**There is no native dependency.** It is pure IL — clone, `dotnet run`, done,
-on Windows, Linux or macOS.
+**There is no native dependency.** It is pure IL — clone, `dotnet run`, done, on **Windows**, **Linux** or **macOS**.
 
-Exercising all of it is a port of
-[cacademo](https://github.com/cacalabs/libcaca/blob/main/src/cacademo.c), the
-demo-effects program that ships with libcaca, which cycles in order through a
-set of full-screen ASCII/ANSI effects, wiping between them with randomly
-chosen transitions.
+## Installation
 
-## Effects
-
-| Effect | Description |
-| --- | --- |
-| `Plasma` | Three sine-distance fields summed together under a cycling palette |
-| `Metaballs` | Additively blended blobs wandering on Lissajous-like paths |
-| `Moire` | Two XORed concentric-ring discs sliding over each other |
-| `Matrix` | Falling columns of glyphs, brightest at the head |
-| `Rotozoom` | A rotating, pulsing zoom over a 256x256 texture, in 24:8 fixed point |
-| `Langton` | Langton's ants leaving fading trails — built, but as upstream, left out of the rotation |
-
-Transitions: circle, star, square, vertical lines, horizontal lines.
-
-## Controls
-
-| Key | Action |
-| --- | --- |
-| `Space` | Pause / resume |
-| `Right`, `Enter` | Skip forward to the next effect |
-| `Left` | Skip back to the previous effect |
-| `Esc`, `Ctrl-C`, `Ctrl-Z` | Quit |
-
-## Building and running
-
-```sh
-dotnet build src/CacaDemo.NET.slnx
-dotnet run --project src/CacaDemo.NET
-```
-
-With no arguments it cycles through the whole rotation in order. Naming an
-effect runs just that one, standalone and without transitions; naming several
-cycles through only those, in the order given:
-
-```sh
-dotnet run --project src/CacaDemo.NET -- --rotozoom
-dotnet run --project src/CacaDemo.NET -- --plasma --matrix
-```
-
-| Option | Action |
-| --- | --- |
-| `--plasma`, `--metaballs`, `--moire`, `--matrix`, `--rotozoom`, `--langton` | Run that effect (`--langton` is otherwise left out of the rotation) |
-| `--list` | List the effect names, one per line |
-| `-h`, `--help` | Show usage |
-
-Both `CACA_DRIVER` and `CACA_SYNC` apply to the demo as they do to anything
-else built on the library; see *Drivers* below.
-
-## Using the library
-
-`Caca.NET` is the port on its own, with no dependency on the demo:
-
-```sh
+```#sh
 dotnet add package Caca.NET
 ```
+
+## Usage
 
 Everything public lives in the `Caca` namespace, apart from the backend
 extension point in `Caca.Drivers`. A whole program:
@@ -142,7 +85,8 @@ you asked for them, so `Canvas.Width` is always current.
 resizes. `EventType` is a flags enum — `KeyPress`, `Quit`, `Resize`, `Any` and
 the rest — used both as the `GetEvent` mask and as the event's own kind.
 
-`KeyCh` carries a character where the key has one, so `' '` and `''` compare
+`KeyCh` carries a character where the key has one, so `' '` and `'
+'` compare
 directly. Keys that do not are the `EventKey` values: `Escape`, `Up`, `Down`,
 `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown`, `F1`–`F12`, `Delete` and
 the `Ctrl-`*x* codes.
@@ -215,97 +159,41 @@ The display takes ownership: disposing the display disposes the driver.
 `CACA_SYNC` overrides the synchronized-output detection described below: `0`
 never emits it, `1` always does, and anything else leaves it to the query.
 
-### Miscellany
+# CacaDemo.NET
 
-`CacaNet.Rand(min, max)` is `caca_rand`, half-open like the original.
-`CacaNet.Version` reports the libcaca release this port tracks.
+Exercising all of it is a port of [cacademo](https://github.com/cacalabs/libcaca/blob/main/src/cacademo.c), the demo-effects program that ships with libcaca, which cycles in order through a
+set of full-screen ASCII/ANSI effects, wiping between them with randomly chosen transitions.
 
-## Layout
+## Installation
 
-```
-src/
-  Caca.NET/             the managed port of libcaca
-    Canvas.cs           cell grid, colours, blitting
-    CanvasDrawing.cs    lines, boxes, triangles, ellipses
-    CanvasDither.cs     bitmap -> coloured characters
-    Dither.cs           pixel format, palette, glyph ramp
-    Attr.cs             the 32-bit cell attribute and colour conversions
-    Display.cs          frame pacing and event dispatch
-    Rand.cs             caca_rand and the version string
-    Drivers/            IDriver, the public extension point, plus
-                        AnsiDriver (terminal) and NullDriver (headless)
-  CacaDemo.NET/
-    Program.cs          main loop: event handling, demo rotation, transitions
-    Transitions.cs      the five wipes
-    Texture.cs          loads the rotozoom texture from an embedded blob
-    Demos/              one file per effect
-```
+```dotnet tool install CacaDemo.NET```
 
-## Notes on the port
+## Run
 
-### Verifying the library against the original
+```CacaDemo.NET```
 
-The dithering engine is the part where "close enough" would be visible, so it
-was checked rather than eyeballed. A harness feeds nine deterministic cases —
-8bpp with cycling palettes, the default grayscale ramp, 32bpp RGB, 32bpp with an
-alpha channel, and several awkward canvas sizes including 1x1 — through both the
-real `libcaca.so.0` and this port, dumping the character and the resolved
-foreground and background of every cell. The two dumps are **byte-identical**
-across all nine cases.
+## Effects
 
-Two genuine bugs surfaced that way, both since fixed: a fresh canvas has to start
-on `DEFAULT` over `TRANSPARENT` rather than light-gray-on-black, and
-`nearest_ansi` has to pass those two special colour values straight through
-instead of resolving them to the nearest real colour.
+| Effect        | Description                                                  |
+| ------------- | ------------------------------------------------------------ |
+| `--Plasma`    | Three sine-distance fields summed together under a cycling palette |
+| `--Metaballs` | Additively blended blobs wandering on Lissajous-like paths   |
+| `--Moire`     | Two XORed concentric-ring discs sliding over each other      |
+| --`Matrix`    | Falling columns of glyphs, brightest at the head             |
+| `--Rotozoom`  | A rotating, pulsing zoom over a 256x256 texture, in 24:8 fixed point |
+| `--Langton`   | Langton's ants leaving fading trails — built, but as upstream, left out of the rotation |
 
-### Scope of the library
+Transitions: circle, star, square, vertical lines, horizontal lines.
 
-`Caca.NET` covers what cacademo exercises, not all of libcaca. In particular it
-implements the default `full16` colour mode — the only one upstream fully
-honours anyway — and treats every cell as single-width, since nothing here draws
-fullwidth CJK glyphs. Brightness and contrast are accepted and reported back but
-do nothing, matching upstream, where both setters are marked `FIXME`.
+## Controls
 
-Only the ANSI terminal and the headless null backend ship in the box, but
-`IDriver` is public, so anything else you want to paint on is a class away.
-
-The only `DllImport` left anywhere is to `kernel32` on Windows, to turn on
-escape-sequence processing in the legacy console. That is an OS call, not a
-library dependency.
-
-### Synchronized output
-
-A frame is a few thousand escape sequences, and a terminal that repaints while
-they are still arriving shows a torn canvas. Private mode 2026 fixes that: the
-terminal holds its presentation between `CSI ? 2026 h` and `CSI ? 2026 l`, so
-the frame appears whole.
-
-`AnsiDriver` asks for it rather than assuming it, with DECRQM — `CSI ? 2026 $ p`
-— at startup. A terminal that knows the mode replies `CSI ? 2026 ; Ps $ y`, and
-a `Ps` of 1 (set) or 2 (reset) means we can use it; 0 means it cannot. The
-awkward case is a terminal that implements no DECRQM at all and so says nothing,
-which would leave us waiting out a timeout for every startup. A Primary Device
-Attributes request (`CSI c`, not `ESC c` — that is RIS, a terminal reset)
-therefore rides along behind the query: every
-terminal answers that one, and its reply is the signal that no 2026 answer is
-coming. Keystrokes that arrive while we wait are queued rather than dropped.
-
-If a terminal supports the mode but not the query, `CACA_SYNC=1` forces it on.
-
-### Notes on the effects
-
-The effects follow the C closely, including its deliberate 8-bit wraparound and
-fixed-point overflow. Two places needed care because C's out-of-bounds and
-negative-index behaviour would throw in .NET rather than quietly scribble: ball
-positions in `Metaballs` and disc offsets in `Moire` are clamped to the range
-their buffers were sized for, and `Matrix` uses a floored modulo when indexing a
-drop's glyphs above the top of the screen.
-
-libcaca ships the rotozoom texture as a generated C header of 65,536 integer
-literals. Rather than paste that into a `.cs` file, it is converted to
-`texture.bin`, an embedded blob of little-endian `0x00RRGGBB` words.
+| Key                       | Action                           |
+| ------------------------- | -------------------------------- |
+| `Space`                   | Pause / resume                   |
+| `Right`, `Enter`          | Skip forward to the next effect  |
+| `Left`                    | Skip back to the previous effect |
+| `Esc`, `Ctrl-C`, `Ctrl-Z` | Quit                             |
 
 ## Licence
 
-cacademo and libcaca are distributed under the [WTFPL](http://www.wtfpl.net/),
-and so is this port. See `LICENSE`.
+cacademo and libcaca are distributed under the [WTFPL](http://www.wtfpl.net/), and so is this port. See `LICENSE`.
