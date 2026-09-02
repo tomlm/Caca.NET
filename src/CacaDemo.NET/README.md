@@ -5,7 +5,7 @@
 This is a dotnet port of [cacademo](https://github.com/cacalabs/libcaca/blob/main/src/cacademo.c), the demo-effects program that ships with libcaca, which cycles in order through a
 set of full-screen ASCII/ANSI effects, wiping between them with randomly chosen transitions, written using [Caca.NET](https://github.com/tomlm/caca.net).
 
-![Caca](https://raw.githubusercontent.com/tomlm/Caca.NET/main/caca.gif)
+![Caca](https://raw.githubusercontent.com/tomlm/Caca.NET/main/src/CacaDemo.NET/caca.gif)
 
 ## Installation
 
