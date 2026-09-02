@@ -26,14 +26,14 @@ internal sealed class Matrix : IDemo
     {
         for (int i = 0; i < MAXDROPS; i++)
         {
-            _drop[i].X = Libcaca.Rand(0, 1000);
-            _drop[i].Y = Libcaca.Rand(0, 1000);
-            _drop[i].Speed = 5 + Libcaca.Rand(0, 30);
-            _drop[i].Len = MINLEN + Libcaca.Rand(0, MAXLEN - MINLEN);
+            _drop[i].X = CacaNet.Rand(0, 1000);
+            _drop[i].Y = CacaNet.Rand(0, 1000);
+            _drop[i].Speed = 5 + CacaNet.Rand(0, 30);
+            _drop[i].Len = MINLEN + CacaNet.Rand(0, MAXLEN - MINLEN);
             _drop[i].Str = new char[MAXLEN];
 
             for (int j = 0; j < MAXLEN; j++)
-                _drop[i].Str[j] = (char)Libcaca.Rand('0', 'z');
+                _drop[i].Str[j] = (char)CacaNet.Rand('0', 'z');
         }
     }
 
@@ -52,7 +52,7 @@ internal sealed class Matrix : IDemo
             if (_drop[i].Y > 1000)
             {
                 _drop[i].Y -= 1000;
-                _drop[i].X = Libcaca.Rand(0, 1000);
+                _drop[i].X = CacaNet.Rand(0, 1000);
             }
         }
     }

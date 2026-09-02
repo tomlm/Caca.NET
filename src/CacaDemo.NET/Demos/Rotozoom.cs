@@ -46,8 +46,7 @@ internal sealed class Rotozoom : IDemo
 
     public void Init(Canvas cv)
     {
-        _dither = new Dither(32, XSIZ, YSIZ, XSIZ * 4,
-                             0x00FF0000, 0x0000FF00, 0x000000FF, 0x00000000);
+        _dither = Dither.Rgb32(XSIZ, YSIZ);
     }
 
     public void Update(Canvas cv, int frame)

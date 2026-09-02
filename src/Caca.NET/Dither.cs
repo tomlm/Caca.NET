@@ -1,5 +1,5 @@
 /*
- *  LibCaca       a managed port of libcaca's canvas, dithering and terminal output
+ *  Caca.NET      a managed port of libcaca's canvas, dithering and terminal output
  *  Ported from libcaca's dither.c (WTFPL); see Colors.cs for the full notice.
  */
 
@@ -92,6 +92,39 @@ public sealed class Dither
 
         Glyphs = AsciiGlyphs;
     }
+
+    /// <summary>
+    /// An 8-bit indexed dither. The palette starts out grayscale; call
+    /// <see cref="SetPalette"/> to supply your own. <paramref name="pitch"/>
+    /// defaults to <paramref name="width"/>, one byte per pixel.
+    /// </summary>
+    public static Dither Indexed8(int width, int height, int pitch = 0) =>
+        new(8, width, height, pitch > 0 ? pitch : width, 0, 0, 0, 0);
+
+    /// <summary>
+    /// A 24-bit dither over packed RGB triples. <paramref name="pitch"/>
+    /// defaults to three bytes per pixel.
+    /// </summary>
+    public static Dither Rgb24(int width, int height, int pitch = 0) =>
+        new(24, width, height, pitch > 0 ? pitch : width * 3,
+            0xFF0000, 0x00FF00, 0x0000FF, 0);
+
+    /// <summary>
+    /// A 32-bit dither over 0x00RRGGBB words, alpha ignored — the layout a
+    /// little-endian machine sees as B, G, R, unused. <paramref name="pitch"/>
+    /// defaults to four bytes per pixel.
+    /// </summary>
+    public static Dither Rgb32(int width, int height, int pitch = 0) =>
+        new(32, width, height, pitch > 0 ? pitch : width * 4,
+            0x00FF0000, 0x0000FF00, 0x000000FF, 0);
+
+    /// <summary>
+    /// A 32-bit dither over 0xAARRGGBB words, alpha honoured. Otherwise as
+    /// <see cref="Rgb32"/>.
+    /// </summary>
+    public static Dither Argb32(int width, int height, int pitch = 0) =>
+        new(32, width, height, pitch > 0 ? pitch : width * 4,
+            0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
 
     internal int Bpp { get; }
     internal int Width { get; }

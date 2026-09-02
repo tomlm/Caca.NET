@@ -1,5 +1,5 @@
 /*
- *  LibCaca       a managed port of libcaca's canvas, dithering and terminal output
+ *  Caca.NET      a managed port of libcaca's canvas, dithering and terminal output
  *  Ported from libcaca, Copyright (c) 2002-2018 Sam Hocevar <sam@hocevar.net>
  *
  *  This library is free software. It comes without any warranty, to

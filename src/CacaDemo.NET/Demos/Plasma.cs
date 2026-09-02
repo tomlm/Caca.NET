@@ -35,10 +35,10 @@ internal sealed class Plasma : IDemo
         Array.Clear(_alpha);
 
         for (int i = 0; i < 3; i++)
-            _r[i] = (double)Libcaca.Rand(1, 1000) / 60000 * Math.PI;
+            _r[i] = (double)CacaNet.Rand(1, 1000) / 60000 * Math.PI;
 
         for (int i = 0; i < 6; i++)
-            _bigR[i] = (double)Libcaca.Rand(1, 1000) / 10000;
+            _bigR[i] = (double)CacaNet.Rand(1, 1000) / 10000;
 
         for (int y = 0; y < TABLEY; y++)
             for (int x = 0; x < TABLEX; x++)
@@ -56,7 +56,7 @@ internal sealed class Plasma : IDemo
     public void Init(Canvas cv)
     {
         _screen = new byte[XSIZ * YSIZ];
-        _dither = new Dither(8, XSIZ, YSIZ, XSIZ, 0, 0, 0, 0);
+        _dither = Dither.Indexed8(XSIZ, YSIZ);
     }
 
     public void Update(Canvas cv, int frame)

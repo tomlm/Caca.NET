@@ -37,9 +37,9 @@ internal sealed class Langton : IDemo
 
         for (int i = 0; i < ANTS; i++)
         {
-            _ax[i] = Libcaca.Rand(0, _width);
-            _ay[i] = Libcaca.Rand(0, _height);
-            _dir[i] = Libcaca.Rand(0, 4);
+            _ax[i] = CacaNet.Rand(0, _width);
+            _ay[i] = CacaNet.Rand(0, _height);
+            _dir[i] = CacaNet.Rand(0, 4);
         }
     }
 

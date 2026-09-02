@@ -39,7 +39,7 @@ internal static class Program
 
     private const int TransitionFrames = 40;
 
-    private static int DemoFrames() => Libcaca.Rand(500, 1000);
+    private static int DemoFrames() => CacaNet.Rand(500, 1000);
 
     private static int Main(string[] args)
     {
@@ -54,7 +54,7 @@ internal static class Program
         /* A lone effect never transitions: it just runs until you quit. */
         bool rotates = fn.Length > 1;
         int nextTransition = rotates ? DemoFrames() : int.MaxValue;
-        int tmode = Libcaca.Rand(0, Transitions.Count);
+        int tmode = CacaNet.Rand(0, Transitions.Count);
 
         /* Set up two canvases, a mask, and attach a display to the front one */
         Canvas frontcv = new();
@@ -142,7 +142,7 @@ internal static class Program
                     current = next;
                     next = -1;
                     nextTransition = frame + DemoFrames();
-                    tmode = Libcaca.Rand(0, Transitions.Count);
+                    tmode = CacaNet.Rand(0, Transitions.Count);
                 }
 
                 if (next != -1)

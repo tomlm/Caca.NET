@@ -1,5 +1,5 @@
 /*
- *  LibCaca       a managed port of libcaca's canvas, dithering and terminal output
+ *  Caca.NET      a managed port of libcaca's canvas, dithering and terminal output
  *  Ported from libcaca's box.c, triangle.c, conic.c and line.c (WTFPL);
  *  see Colors.cs for the full notice.
  */

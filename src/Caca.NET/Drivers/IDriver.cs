@@ -1,5 +1,5 @@
 /*
- *  LibCaca       a managed port of libcaca's canvas, dithering and terminal output
+ *  Caca.NET      a managed port of libcaca's canvas, dithering and terminal output
  *  See Colors.cs for the full notice.
  */
 
@@ -7,9 +7,11 @@ namespace Caca.Drivers;
 
 /// <summary>
 /// An output backend. libcaca picks one of these at runtime from the
-/// CACA_DRIVER environment variable; so does this port.
+/// CACA_DRIVER environment variable, and so does this port; implement it to
+/// paint somewhere else and hand your driver to
+/// <see cref="Display(Canvas, IDriver)"/>.
 /// </summary>
-internal interface IDriver : IDisposable
+public interface IDriver : IDisposable
 {
     /// <summary>Current output size, in character cells.</summary>
     int Width { get; }

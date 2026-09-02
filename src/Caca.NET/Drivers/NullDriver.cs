@@ -1,5 +1,5 @@
 /*
- *  LibCaca       a managed port of libcaca's canvas, dithering and terminal output
+ *  Caca.NET      a managed port of libcaca's canvas, dithering and terminal output
  *  See Colors.cs for the full notice.
  */
 

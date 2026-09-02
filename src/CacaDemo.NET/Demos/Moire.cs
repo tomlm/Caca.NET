@@ -34,7 +34,7 @@ internal sealed class Moire : IDemo
         Array.Clear(_alpha);
 
         for (int i = 0; i < 6; i++)
-            _d[i] = Libcaca.Rand(50, 70) / 1000.0f;
+            _d[i] = CacaNet.Rand(50, 70) / 1000.0f;
 
         _red[0] = _green[0] = _blue[0] = 0x777;
         _red[1] = _green[1] = _blue[1] = 0xfff;
@@ -70,7 +70,7 @@ internal sealed class Moire : IDemo
     public void Init(Canvas cv)
     {
         _screen = new byte[XSIZ * YSIZ];
-        _dither = new Dither(8, XSIZ, YSIZ, XSIZ, 0, 0, 0, 0);
+        _dither = Dither.Indexed8(XSIZ, YSIZ);
     }
 
     public void Update(Canvas cv, int frame)

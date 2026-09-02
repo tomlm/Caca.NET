@@ -1,5 +1,5 @@
 /*
- *  LibCaca       a managed port of libcaca's canvas, dithering and terminal output
+ *  Caca.NET      a managed port of libcaca's canvas, dithering and terminal output
  *  Ported from libcaca's graphics.c (WTFPL); see Colors.cs for the full notice.
  */
 
@@ -25,14 +25,33 @@ public sealed class Display : IDisposable
     {
     }
 
-    /// <summary>Creates a display for the given canvas, resizing it to fit the output.</summary>
+    /// <summary>
+    /// Creates a display for the given canvas on the driver named by
+    /// CACA_DRIVER, resizing the canvas to fit the output.
+    /// </summary>
     public Display(Canvas canvas)
     {
         ArgumentNullException.ThrowIfNull(canvas);
 
+        /* Built after the null check: constructing a driver takes over the
+         * terminal, which would be rude to do and then throw. */
         Canvas = canvas;
         _driver = CreateDriver();
         Canvas.Resize(_driver.Width, _driver.Height);
+    }
+
+    /// <summary>
+    /// Creates a display on a driver of your own, ignoring CACA_DRIVER. The
+    /// display takes ownership: disposing it disposes the driver.
+    /// </summary>
+    public Display(Canvas canvas, IDriver driver)
+    {
+        ArgumentNullException.ThrowIfNull(canvas);
+        ArgumentNullException.ThrowIfNull(driver);
+
+        Canvas = canvas;
+        _driver = driver;
+        Canvas.Resize(driver.Width, driver.Height);
     }
 
     /// <summary>The canvas this display paints.</summary>

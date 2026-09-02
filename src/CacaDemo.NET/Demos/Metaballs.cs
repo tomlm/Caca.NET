@@ -50,13 +50,13 @@ internal sealed class Metaballs : IDemo
 
         for (int n = 0; n < METABALLS; n++)
         {
-            _dd[n] = Libcaca.Rand(0, 100);
-            _di[n] = Libcaca.Rand(500, 4000) / 6000.0f;
-            _dj[n] = Libcaca.Rand(500, 4000) / 6000.0f;
-            _dk[n] = Libcaca.Rand(500, 4000) / 6000.0f;
+            _dd[n] = CacaNet.Rand(0, 100);
+            _di[n] = CacaNet.Rand(500, 4000) / 6000.0f;
+            _dj[n] = CacaNet.Rand(500, 4000) / 6000.0f;
+            _dk[n] = CacaNet.Rand(500, 4000) / 6000.0f;
         }
 
-        _angleoff = Libcaca.Rand(0, 360);
+        _angleoff = CacaNet.Rand(0, 360);
 
         for (int n = 0; n < 360 + 80; n++)
             _offset[n] = 1.0 + Math.Sin(n * Math.PI / 60);
@@ -67,7 +67,7 @@ internal sealed class Metaballs : IDemo
         _screen = new byte[XSIZ * YSIZ];
         /* Create a dither smaller than the pixel buffer, so that we display
          * only the interesting part of it */
-        _dither = new Dither(8, XSIZ - METASIZE, YSIZ - METASIZE, XSIZ, 0, 0, 0, 0);
+        _dither = Dither.Indexed8(XSIZ - METASIZE, YSIZ - METASIZE, XSIZ);
     }
 
     public void Update(Canvas cv, int frame)

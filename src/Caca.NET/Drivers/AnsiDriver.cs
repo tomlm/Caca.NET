@@ -1,5 +1,5 @@
 /*
- *  LibCaca       a managed port of libcaca's canvas, dithering and terminal output
+ *  Caca.NET      a managed port of libcaca's canvas, dithering and terminal output
  *  See Colors.cs for the full notice.
  */
 
@@ -23,9 +23,23 @@ internal sealed class AnsiDriver : IDriver
     /// </summary>
     private static readonly int[] ToAnsiIndex = [0, 4, 2, 6, 1, 5, 3, 7];
 
+    /// <summary>Private mode 2026: hold the frame back until it is complete.</summary>
+    private const string BeginSyncUpdate = Esc + "?2026h";
+    private const string EndSyncUpdate = Esc + "?2026l";
+
+    private const char Escape = '\u001b';
+
+    /// <summary>How long to wait for the terminal to answer the mode query.</summary>
+    private const int QueryTimeoutMs = 100;
+
     private readonly StringBuilder _out = new(1 << 16);
     private readonly TextWriter _writer;
     private readonly bool _ownsConsole;
+    private readonly bool _syncUpdate;
+
+    /// <summary>Keystrokes read while waiting for a query reply, kept for
+    /// <see cref="PollEvent"/> rather than thrown away.</summary>
+    private readonly Queue<int> _pendingKeys = new();
 
     private int[] _prevChars = [];
     private uint[] _prevAttrs = [];
@@ -59,6 +73,8 @@ internal sealed class AnsiDriver : IDriver
         /* Alternate screen buffer, cursor hidden, cleared. */
         Write($"{Esc}?1049h{Esc}?25l{Esc}0m{Esc}2J");
         Flush();
+
+        _syncUpdate = DetectSyncUpdate();
     }
 
     public int Width { get; private set; }
@@ -144,6 +160,14 @@ internal sealed class AnsiDriver : IDriver
         if (_out.Length == 0)
             return;
 
+        /* Everything between BSU and ESU is presented as one frame, so the
+         * terminal never paints a half-drawn canvas. */
+        if (_syncUpdate)
+        {
+            _out.Insert(0, BeginSyncUpdate);
+            _out.Append(EndSyncUpdate);
+        }
+
         Write(_out.ToString());
         _out.Clear();
         Flush();
@@ -171,6 +195,9 @@ internal sealed class AnsiDriver : IDriver
             _pendingResize = false;
             return Event.Resized(Width, Height);
         }
+
+        if (_pendingKeys.Count > 0)
+            return Event.Key(_pendingKeys.Dequeue());
 
         try
         {
@@ -210,9 +237,126 @@ internal sealed class AnsiDriver : IDriver
             /* Never got it in the first place. */
         }
 
-        /* Reset attributes, show the cursor, leave the alternate buffer. */
+        /* Close any update still open, reset attributes, show the cursor,
+         * leave the alternate buffer. */
+        if (_syncUpdate)
+            Write(EndSyncUpdate);
+
         Write($"{Esc}0m{Esc}?25h{Esc}?1049l");
         Flush();
+    }
+
+    /// <summary>
+    /// Asks the terminal whether it knows private mode 2026, synchronized
+    /// output, using DECRQM: <c>CSI ? 2026 $ p</c>. A terminal that does
+    /// answers <c>CSI ? 2026 ; Ps $ y</c>, where Ps is 0 for "no such mode",
+    /// 1 for set and 2 for reset — so 1 or 2 means we can use it.
+    ///
+    /// A terminal that implements no DECRQM at all simply says nothing, so a
+    /// Primary Device Attributes request, <c>CSI c</c>, rides along behind the
+    /// query. Every terminal answers that one, and its reply is the signal that
+    /// no 2026 answer is coming, which saves waiting out the timeout. Note it
+    /// is CSI c, not ESC c: the latter is RIS, and would reset the terminal.
+    ///
+    /// <c>CACA_SYNC=0</c> forces this off and <c>CACA_SYNC=1</c> forces it on,
+    /// for terminals that support the mode but not the query.
+    /// </summary>
+    private bool DetectSyncUpdate()
+    {
+        string? forced = Environment.GetEnvironmentVariable("CACA_SYNC");
+
+        if (forced == "0")
+            return false;
+
+        if (forced == "1")
+            return true;
+
+        if (!_ownsConsole || Console.IsInputRedirected)
+            return false;
+
+        /* DECRQM for mode 2026, then DA1. Esc is "ESC [", so this is
+         * CSI ? 2026 $ p followed by CSI c. */
+        Write($"{Esc}?2026$p{Esc}c");
+        Flush();
+
+        bool supported = false;
+        StringBuilder seq = new();
+        bool inSeq = false;
+        long deadline = Environment.TickCount64 + QueryTimeoutMs;
+
+        while (Environment.TickCount64 < deadline)
+        {
+            try
+            {
+                if (!Console.KeyAvailable)
+                {
+                    Thread.Sleep(1);
+                    continue;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+
+            char c = Console.ReadKey(intercept: true).KeyChar;
+
+            if (!inSeq)
+            {
+                /* Anything the user typed at us meanwhile is a real keystroke. */
+                if (c == Escape)
+                {
+                    inSeq = true;
+                    seq.Clear();
+                }
+                else if (c != '\0')
+                {
+                    _pendingKeys.Enqueue(c);
+                }
+
+                continue;
+            }
+
+            seq.Append(c);
+
+            /* A CSI sequence runs until a byte in 0x40..0x7e, which the '['
+             * introducer would otherwise satisfy on its own. */
+            if (seq.Length == 1 && c == '[')
+                continue;
+
+            if (c is < '@' or > '~')
+                continue;
+
+            inSeq = false;
+
+            if (IsSyncUpdateReply(seq.ToString()))
+                supported = true;
+
+            /* The device attributes reply: the terminal has had its say. */
+            if (c == 'c')
+                break;
+        }
+
+        return supported;
+    }
+
+    /// <summary>Recognises <c>CSI ? 2026 ; Ps $ y</c> with Ps of 1 or 2, given
+    /// the sequence with its leading escape already stripped.</summary>
+    private static bool IsSyncUpdateReply(string seq)
+    {
+        if (!seq.StartsWith("[?", StringComparison.Ordinal) ||
+            !seq.EndsWith("$y", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string body = seq[2..^2];
+        int semi = body.IndexOf(';');
+
+        if (semi < 0 || !body.AsSpan(0, semi).SequenceEqual("2026"))
+            return false;
+
+        return body[(semi + 1)..] is "1" or "2";
     }
 
     private void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)

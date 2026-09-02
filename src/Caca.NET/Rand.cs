@@ -1,12 +1,12 @@
 /*
- *  LibCaca       a managed port of libcaca's canvas, dithering and terminal output
+ *  Caca.NET      a managed port of libcaca's canvas, dithering and terminal output
  *  Ported from libcaca's canvas.c (WTFPL); see Colors.cs for the full notice.
  */
 
 namespace Caca;
 
 /// <summary>Bits of libcaca that do not belong to any object.</summary>
-public static class Libcaca
+public static class CacaNet
 {
     private static readonly Random Rng = new();
 

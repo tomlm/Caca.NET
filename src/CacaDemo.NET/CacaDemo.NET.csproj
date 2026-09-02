@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\LibCaca\LibCaca.csproj" />
+    <ProjectReference Include="..\Caca.NET\Caca.NET.csproj" />
   </ItemGroup>
 
   <ItemGroup>
