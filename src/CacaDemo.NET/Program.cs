@@ -46,10 +46,22 @@ internal static class Program
         private readonly Stopwatch _clock = Stopwatch.StartNew();
         private long _windowStart;
         private int _frames;
-        private double _rate;
+        private long _deliveredAtWindowStart;
+        private long _skippedAtWindowStart;
+        private double _pushRate;
+        private double _drawnRate;
+        private long _skipsInWindow;
 
-        /// <summary>Records one presented frame.</summary>
-        public void Tick()
+        /// <summary>
+        /// Records one animation frame, alongside the display's running delivery totals.
+        /// </summary>
+        /// <remarks>
+        /// All three figures are cut from the SAME window, closed here in one place, so the
+        /// reading is internally consistent: push minus drawn over a window is its skips, give or
+        /// take the frame in flight, and three numbers sampled at three different moments would
+        /// not add up.
+        /// </remarks>
+        public void Tick(long deliveredTotal, long skippedTotal)
         {
             _frames++;
 
@@ -59,8 +71,13 @@ internal static class Program
             if (elapsed < WindowSeconds)
                 return;
 
-            _rate = _frames / elapsed;
+            _pushRate = _frames / elapsed;
+            _drawnRate = (deliveredTotal - _deliveredAtWindowStart) / elapsed;
+            _skipsInWindow = skippedTotal - _skippedAtWindowStart;
+
             _frames = 0;
+            _deliveredAtWindowStart = deliveredTotal;
+            _skippedAtWindowStart = skippedTotal;
             _windowStart = now;
         }
 
@@ -68,9 +85,16 @@ internal static class Program
         /// The reading, at a fixed width so a shrinking number cannot leave a digit of the
         /// previous one behind on a canvas the demo did not happen to repaint.
         /// </summary>
-        public string Text => _rate > 0
-            ? string.Format(" {0,6:0.0} fps ", _rate)
-            : "   --.- fps ";
+        /// <remarks>
+        /// Two rates, because one is ambiguous and misleadingly so. PUSH is how fast the animation
+        /// advances -- the demo's own loop, which the writer queue deliberately uncouples from the
+        /// terminal. DRAWN is how fast complete frames actually reach the terminal, which under
+        /// synchronised output is the rate the screen truly changes at. A slow terminal shows as
+        /// the gap between them, and the skips are that gap made countable.
+        /// </remarks>
+        public string Text => _pushRate > 0
+            ? string.Format(" {0,5:0.0} push {1,5:0.0} drawn {2,4} skip ", _pushRate, _drawnRate, _skipsInWindow)
+            : "  --.- push  --.- drawn    0 skip ";
     }
 
     private static readonly DemoEntry[] All =
@@ -232,7 +256,9 @@ internal static class Program
              * the rate DisplayTime asks for, which is the whole point of showing it. */
             if (fps is not null)
             {
-                fps.Tick();
+                /* Both totals read at the same moment the frame is counted, so the window the
+                 * meter closes is cut from one instant and its three figures add up. */
+                fps.Tick(dp.DeliveredFrames, dp.SkippedFrames);
 
                 string reading = fps.Text;
                 /* Top right, mirroring the banner's inset at the bottom, so the two never
