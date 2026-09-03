@@ -63,6 +63,19 @@ public sealed class Display : IDisposable
     /// </summary>
     public int DisplayTime { get; set; }
 
+    /// <summary>
+    /// How many frames the backend skipped because the output could not keep up.
+    /// </summary>
+    /// <remarks>
+    /// A frame rate on its own cannot distinguish a demo running at full speed from one whose
+    /// frames are being thrown away before they reach the screen. Read alongside the rate, this
+    /// says which is happening.
+    /// </remarks>
+    public long SkippedFrames => _driver.SkippedFrames;
+
+    /// <summary>How many frames have actually reached the output. See <see cref="SkippedFrames"/>.</summary>
+    public long DeliveredFrames => _driver.DeliveredFrames;
+
     /// <summary>Sets the window title where the backend has one.</summary>
     public string Title
     {
@@ -73,6 +86,7 @@ public sealed class Display : IDisposable
     public void Refresh()
     {
         _driver.Refresh(Canvas);
+
 
         if (DisplayTime <= 0)
             return;

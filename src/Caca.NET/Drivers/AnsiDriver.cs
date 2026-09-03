@@ -47,6 +47,38 @@ internal sealed class AnsiDriver : IDriver
 
     /// <summary>How much of <see cref="_buf"/> the frame so far occupies.</summary>
     private int _len;
+
+    /// <summary>How many finished frames may be waiting to go out before one is skipped.</summary>
+    /// <remarks>
+    /// <para>Eight by default -- 160ms of lag at fifty frames a second -- and CACA_QUEUE overrides
+    /// it. Two was the first answer, on the argument that the queue exists to stop the terminal
+    /// setting the pace, not to buffer a backlog. What two frames of slack could not absorb was a
+    /// drain that is BURSTY rather than slow: Windows' pseudoconsole accepts the same output at
+    /// better than frame rate on average and still stalls past forty milliseconds at a time, so
+    /// frames were skipped against a pipeline that was, on average, keeping up.</para>
+    /// <para>The proof is the WSL relay, which pushes identical bytes through the identical
+    /// pseudoconsole into the identical terminal with no skips at all -- not by being faster, but
+    /// by being DEEPER: the kernel pty buffer and the relay in front of it absorb exactly the
+    /// stalls this queue was too shallow for. This is that depth, in-process.</para>
+    /// <para>Latency only shows when the queue actually fills, so a terminal that keeps up sees
+    /// frames as fresh as it ever did. A genuinely slow terminal shows frames up to the queue's
+    /// depth stale -- for a demo, a far better trade than losing them.</para>
+    /// </remarks>
+    private static readonly int MaxPending =
+        int.TryParse(Environment.GetEnvironmentVariable("CACA_QUEUE"), out var depth) && depth > 0
+            ? depth
+            : 8;
+
+    private readonly object _qlock = new();
+    private readonly Queue<(char[] Buffer, int Length)> _pending = new();
+    private readonly Stack<char[]> _spare = new();
+    private readonly bool _async;
+    private Thread? _writerThread;
+    private bool _writerStop;
+    private long _skipped;
+    private long _delivered;
+    /// <summary>What the console's output encoding was before the driver changed it, if it did.</summary>
+    private Encoding? _previousOutputEncoding;
     private readonly TextWriter _writer;
     private readonly bool _ownsConsole;
     private readonly bool _syncUpdate;
@@ -67,10 +99,45 @@ internal sealed class AnsiDriver : IDriver
 
     public AnsiDriver()
     {
-        _writer = Console.Out;
+        /* Our own writer over the raw stream, not Console.Out. The writer behind Console.Out
+         * carries a 256-character buffer with AutoFlush on, so a frame-sized write leaves the
+         * process as a thousand syscall-sized fragments -- each one separately parsed and
+         * re-serialized by the pseudoconsole on Windows, plus a synchronization lock per call.
+         * Measured against a live pseudoconsole with full-screen frames: 14 frames a second
+         * through Console.Out, around a hundred through this. That gap was the entire difference
+         * between the demo run natively and the same demo relayed from WSL, whose native relay
+         * never chunks. This writer buffers 64K and flushes when the DRIVER says so, which it
+         * already does explicitly everywhere it matters.
+         *
+         * One managed path for every platform, deliberately. WriteConsoleW measured no faster, and
+         * everything it would have bought is had more simply: the encoding switch below makes the
+         * console read this writer's UTF-8 correctly, and the switch is UNDONE in Dispose rather
+         * than left changing the code page of whatever shell the demo was launched from. Guarded,
+         * because a redirected handle can refuse it -- bytes to a file need no code page. */
+        try
+        {
+            _previousOutputEncoding = Console.OutputEncoding;
+            Console.OutputEncoding = new UTF8Encoding(false);
+        }
+        catch (Exception e) when (e is System.IO.IOException or System.Security.SecurityException)
+        {
+            _previousOutputEncoding = null;
+        }
+
+        _writer = new System.IO.StreamWriter(
+            Console.OpenStandardOutput(), new UTF8Encoding(false), 1 << 16, leaveOpen: true)
+        {
+            AutoFlush = false,
+        };
+
         _ownsConsole = true;
 
+        /* On by default. Opt out with CACA_ASYNC=0 for a caller that would rather have the write
+         * accounted to the frame that caused it -- a test comparing output, say. */
+        _async = Environment.GetEnvironmentVariable("CACA_ASYNC") != "0";
+
         EnableVirtualTerminal();
+
         _raisedTimerResolution = RaiseTimerResolution();
 
         (Width, Height) = ReadSize();
@@ -91,6 +158,19 @@ internal sealed class AnsiDriver : IDriver
         Flush();
 
         _syncUpdate = DetectSyncUpdate();
+
+        /* Started after the setup above has gone out synchronously, so nothing it wrote can be
+         * overtaken by a frame. */
+        if (_async)
+        {
+            _writerThread = new Thread(WriterLoop)
+            {
+                IsBackground = true,
+                Name = "caca-ansi-writer",
+            };
+
+            _writerThread.Start();
+        }
     }
 
     public int Width { get; private set; }
@@ -100,6 +180,25 @@ internal sealed class AnsiDriver : IDriver
     public void Refresh(Canvas canvas)
     {
         ArgumentNullException.ThrowIfNull(canvas);
+
+        /* Asked BEFORE the frame is built, and that ordering is the whole correctness argument.
+         *
+         * This driver sends differences: _prevChars and _prevAttrs describe what the TERMINAL is
+         * showing, and a cell is only sent when it differs from them. Building a frame updates
+         * them. So a frame that is built and then thrown away has already recorded its changes as
+         * delivered when they never went anywhere, and every one of those cells is wrong on screen
+         * until something else happens to touch it -- permanently, for a cell nothing writes to
+         * again.
+         *
+         * Skipping before the build leaves _prev exactly as it was, still describing what was last
+         * SENT. The canvas meanwhile keeps animating, so the next frame that is built diffs against
+         * the screen and naturally carries everything that accumulated while we were behind. The
+         * skip costs a frame of animation, not correctness. */
+        if (_async && PendingIsFull())
+        {
+            _skipped++;
+            return;
+        }
 
         int w = canvas.Width;
         int h = canvas.Height;
@@ -199,9 +298,20 @@ internal sealed class AnsiDriver : IDriver
         if (_syncUpdate)
             Put(EndSyncUpdate);
 
-        Write(_buf, _len);
+        if (_async)
+        {
+            /* The buffer goes with the frame; this thread takes another one, so the writer is
+             * never reading an array the next frame is being built into. */
+            Enqueue(_buf, _len);
+        }
+        else
+        {
+            Write(_buf, _len);
+            Flush();
+            Interlocked.Increment(ref _delivered);
+        }
+
         _len = 0;
-        Flush();
     }
 
     public Event PollEvent()
@@ -246,6 +356,10 @@ internal sealed class AnsiDriver : IDriver
 
     public void SetTitle(string title)
     {
+        /* Behind whatever frames are already queued, so the title does not land in the middle of
+         * one. */
+        Drain();
+
         /* OSC 0: set both icon name and window title. */
         Write($"]0;{title}");
         Flush();
@@ -257,6 +371,10 @@ internal sealed class AnsiDriver : IDriver
             return;
 
         _disposed = true;
+
+        /* Everything queued goes out before the teardown below, which must be the last thing the
+         * terminal sees. */
+        StopWriter();
 
         if (_raisedTimerResolution)
         {
@@ -276,6 +394,9 @@ internal sealed class AnsiDriver : IDriver
             /* Never got it in the first place. */
         }
 
+        /* Nothing flushes this writer but us, and the reset below must actually arrive. */
+        try { _writer.Flush(); } catch { }
+
         /* Close any update still open, reset attributes, show the cursor,
          * leave the alternate buffer. */
         if (_syncUpdate)
@@ -283,6 +404,17 @@ internal sealed class AnsiDriver : IDriver
 
         Write($"{Esc}0m{Esc}?25h{Esc}?1049l");
         Flush();
+
+        /* The code page belongs to the console the demo was launched from, not to the demo. */
+        if (_previousOutputEncoding is not null)
+        {
+            try { Console.OutputEncoding = _previousOutputEncoding; }
+            catch (Exception e) when (e is System.IO.IOException or System.Security.SecurityException)
+            {
+            }
+
+            _previousOutputEncoding = null;
+        }
     }
 
     /// <summary>
@@ -470,6 +602,123 @@ internal sealed class AnsiDriver : IDriver
         return (80, 24);
     }
 
+    /// <inheritdoc />
+    public long SkippedFrames => Interlocked.Read(ref _skipped);
+
+    /// <inheritdoc />
+    public long DeliveredFrames => Interlocked.Read(ref _delivered);
+
+    /// <summary>Hands a finished frame to the writer thread and takes a fresh buffer.</summary>
+    private void Enqueue(char[] buffer, int length)
+    {
+        lock (_qlock)
+        {
+            _pending.Enqueue((buffer, length));
+
+            _buf = _spare.Count > 0
+                ? _spare.Pop()
+                : new char[buffer.Length];
+
+            Monitor.PulseAll(_qlock);
+        }
+    }
+
+    /// <summary>Whether the writer is far enough behind that this frame should be skipped.</summary>
+    private bool PendingIsFull()
+    {
+        lock (_qlock)
+            return _pending.Count >= MaxPending;
+    }
+
+    /// <summary>Waits for every queued frame to reach the terminal.</summary>
+    private void Drain()
+    {
+        if (!_async)
+            return;
+
+        lock (_qlock)
+        {
+            while (_pending.Count > 0)
+                Monitor.Wait(_qlock);
+        }
+    }
+
+    /// <summary>Drains the queue, then stops the writer thread and waits for it.</summary>
+    private void StopWriter()
+    {
+        Thread? thread = _writerThread;
+
+        if (thread is null)
+            return;
+
+        _writerThread = null;
+
+        lock (_qlock)
+        {
+            _writerStop = true;
+            Monitor.PulseAll(_qlock);
+        }
+
+        /* The loop finishes what is queued before it sees the stop, so this is the drain as well.
+         * Bounded, because a terminal that has stopped consuming must not stop us exiting. */
+        thread.Join(TimeSpan.FromSeconds(2));
+    }
+
+    /// <summary>
+    /// Writes finished frames, off the thread that builds them.
+    /// </summary>
+    /// <remarks>
+    /// A write to a console handle costs whatever the terminal takes to consume it -- measured at
+    /// fifteen times a write to a pipe, and far more than that when the terminal is rendering and
+    /// the pseudoconsole's buffer fills, at which point the write simply blocks. Done on the demo's
+    /// own thread that makes the terminal the pacemaker: the animation slows to whatever the
+    /// terminal can draw. Doing it here is what a relay process does for a program running under
+    /// WSL, and is why the same program appears to hold its frame rate there.
+    /// </remarks>
+    private void WriterLoop()
+    {
+        while (true)
+        {
+            char[] buffer;
+            int length;
+
+            lock (_qlock)
+            {
+                while (_pending.Count == 0 && !_writerStop)
+                    Monitor.Wait(_qlock);
+
+                if (_pending.Count == 0)
+                    return;
+
+                (buffer, length) = _pending.Dequeue();
+                Monitor.PulseAll(_qlock);
+            }
+
+            try
+            {
+                Write(buffer, length);
+                Flush();
+
+                /* Counted after the write completes, so a frame is "delivered" only once the
+                 * terminal has accepted every byte of it -- which is also why this number lags the
+                 * demo's own rate when the terminal is slow: the gap between the two IS the
+                 * slowness. */
+                Interlocked.Increment(ref _delivered);
+            }
+            catch
+            {
+                /* The terminal has gone. There is nothing this thread can usefully do about it,
+                 * and throwing here would take the process down from a background thread. */
+            }
+
+            lock (_qlock)
+            {
+                _spare.Push(buffer);
+                Monitor.PulseAll(_qlock);
+            }
+        }
+    }
+
     private void Write(string s)
     {
         if (_ownsConsole)
@@ -478,12 +727,11 @@ internal sealed class AnsiDriver : IDriver
 
     /// <summary>Writes the frame as one span of the buffer it was built in.</summary>
     /// <remarks>
-    /// The char[] overload and not the span one: TextWriter does not override
-    /// Write(ReadOnlySpan&lt;char&gt;) on the console writer, so the base implementation rents a
-    /// second array, copies into it, and calls this anyway. Console.Out is also, measured, the
-    /// fastest of the paths available here -- a console handle wants WriteConsoleW, which it uses,
-    /// where a raw stream over the same handle falls back to WriteFile and is several times
-    /// slower. That is the reverse of the usual advice, which assumes a pipe.
+    /// Nothing platform-specific, on purpose. A direct WriteConsoleW path was tried and measured
+    /// NO faster than this writer -- the killer was only ever Console.Out fragmenting the frame,
+    /// and any strategy that puts it out in a few large writes lands in the same place. The
+    /// writer's own 64K buffering also keeps each underlying write under the size a console
+    /// has historically refused in one piece.
     /// </remarks>
     private void Write(char[] buffer, int count)
     {
@@ -627,4 +875,5 @@ internal sealed class AnsiDriver : IDriver
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetConsoleMode(nint hConsoleHandle, uint dwMode);
+
 }
